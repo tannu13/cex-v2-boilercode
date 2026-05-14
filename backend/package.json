@@ -4,7 +4,9 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun run src/index.ts"
+    "dev": "bun --watch run src/index.ts",
+    "db:migrate": "bunx prisma migrate deploy",
+    "db:generate": "bunx prisma generate"
   },
   "devDependencies": {
     "@types/bun": "latest",

@@ -69,7 +69,26 @@ export interface DepthResponse {
   asks: DepthLevel[];
 }
 
+export const PRIMARY_CURRENCY = "INR";
+export const SUPPORTED_SYMBOLS = ["BTC", "SOL"];
+const intialOrderBook = SUPPORTED_SYMBOLS.map((s) => ({
+  symbol: s,
+  bids: new Map(),
+  asks: new Map(),
+}));
 export const BALANCES = new Map<string, Record<string, Balance>>();
-export const ORDERBOOKS = new Map<string, OrderBook>();
+export const ORDERBOOKS = new Map<string, OrderBook>(
+  intialOrderBook.map((entry) => [
+    entry.symbol,
+    { bids: entry.bids, asks: entry.asks },
+  ]),
+);
+/*
+[
+  ["BTC", { bids: new Map(), asks: new Map() }],
+  ["SOL", { bids: new Map(), asks: new Map() }],
+  ["ABC", { bids: new Map(), asks: new Map() }],
+]
+*/
 export const ORDERS = new Map<string, OrderRecord>();
 export const FILLS: Fill[] = [];

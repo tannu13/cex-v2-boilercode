@@ -1,4 +1,5 @@
 export type EngineCommandType =
+  | "init_user_balance"
   | "create_order"
   | "get_depth"
   | "get_user_balance"
