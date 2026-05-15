@@ -847,6 +847,28 @@ function handleEngineRequest(message: EngineRequest): unknown {
               }
             }
           }
+
+          if (remainingQty > 0) {
+            // add the bid to order book
+            const availableAsks = orderbook.asks.get(price);
+            const currentOrder = {
+              orderId: currentOrderId,
+              userId,
+              side,
+              type,
+              symbol,
+              price,
+              qty,
+              filledQty: qty - remainingQty,
+              status: "partially_filled",
+              createdAt: new Date().getTime(),
+            } satisfies RestingOrder;
+            if (!availableAsks) {
+              orderbook.asks.set(price, [currentOrder]);
+            } else {
+              availableAsks.push(currentOrder);
+            }
+          }
         }
       }
     } else if (type === "market") {
