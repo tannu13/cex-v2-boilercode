@@ -185,47 +185,22 @@ function handleEngineRequest(message: EngineRequest): unknown {
     if (type === "limit" && price) {
       // check + lock balance (INR for BUY, stock for SELL)
       // lock balance wud only happen for limit orders as market orders get either filled or cancelled
-      const totalPrice = price * qty;
       if (side === "buy") {
+        let bestAskPrice = getNextBestAskPrice(symbol);
+
+        const totalPrice = price * qty;
         if (
           !userBalance[PRIMARY_CURRENCY] ||
           Number(userBalance[PRIMARY_CURRENCY]?.available) < totalPrice
         ) {
           throw new Error("User has insufficient balance");
         }
-        userBalance[PRIMARY_CURRENCY] = {
-          available: userBalance[PRIMARY_CURRENCY].available - totalPrice,
-          locked: userBalance[PRIMARY_CURRENCY].locked + totalPrice,
-        };
+        let remainingQty = qty;
+        while (remainingQty > 0 && bestAskPrice && bestAskPrice <= price) {
+          const ordersAtPrice = orderbook.asks.get(
+            bestAskPrice,
+          ) as RestingOrder[]; // this'll always be there because i got the bestAskPrice from asks
 
-        const ordersAtPrice = orderbook.asks.get(price);
-        if (!ordersAtPrice) {
-          const availableBids = orderbook.bids.get(price);
-          const currentOrder = {
-            orderId: currentOrderId,
-            userId,
-            side,
-            type,
-            symbol,
-            price,
-            qty,
-            filledQty: 0,
-            status: "open",
-            createdAt: new Date().getTime(),
-          } satisfies RestingOrder;
-          if (!availableBids) {
-            orderbook.bids.set(price, [currentOrder]);
-          } else {
-            availableBids.push(currentOrder);
-          }
-          // push the current to the order book as there are no asks matching given price
-          ORDERS.set(currentOrderId, {
-            ...currentOrder,
-            fills: [],
-          });
-        } else {
-          // there are asks so some / all of this can be matched
-          let remainingQty = qty;
           for (let i = ordersAtPrice.length - 1; i >= 0; i--) {
             const restingOrder = ordersAtPrice[i]!;
             const availableQty = restingOrder.qty - restingOrder.filledQty;
@@ -235,7 +210,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
               const fill: Fill = {
                 fillId,
                 symbol,
-                price,
+                price: bestAskPrice,
                 qty: remainingQty,
                 buyOrderId: currentOrderId,
                 sellOrderId: restingOrder.orderId,
@@ -250,7 +225,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
                   side,
                   type,
                   symbol,
-                  price,
+                  price: bestAskPrice,
                   qty: remainingQty,
                   filledQty: remainingQty,
                   status: "filled",
@@ -286,11 +261,11 @@ function handleEngineRequest(message: EngineRequest): unknown {
               FILLS.push(fill);
 
               // deduct currency & add symbol qty from buyer
-              const priceForFilledQty = fill.qty * price;
+              const priceForFilledQty = fill.qty * bestAskPrice;
               userBalance[PRIMARY_CURRENCY] = {
-                available: userBalance[PRIMARY_CURRENCY].available,
-                locked:
-                  userBalance[PRIMARY_CURRENCY].locked - priceForFilledQty,
+                available:
+                  userBalance[PRIMARY_CURRENCY].available - priceForFilledQty,
+                locked: userBalance[PRIMARY_CURRENCY].locked,
               };
               userBalance[symbol] = {
                 available: Number(userBalance[symbol]?.available) + fill.qty,
@@ -321,7 +296,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
               const fill: Fill = {
                 fillId,
                 symbol,
-                price,
+                price: bestAskPrice,
                 qty: remainingQty,
                 buyOrderId: currentOrderId,
                 sellOrderId: restingOrder.orderId,
@@ -336,7 +311,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
                   side,
                   type,
                   symbol,
-                  price,
+                  price: bestAskPrice,
                   qty: remainingQty,
                   filledQty: remainingQty,
                   status: "filled",
@@ -372,11 +347,11 @@ function handleEngineRequest(message: EngineRequest): unknown {
               FILLS.push(fill);
 
               // deduct currency & add symbol qty from buyer
-              const priceForFilledQty = fill.qty * price;
+              const priceForFilledQty = fill.qty * bestAskPrice;
               userBalance[PRIMARY_CURRENCY] = {
-                available: userBalance[PRIMARY_CURRENCY].available,
-                locked:
-                  userBalance[PRIMARY_CURRENCY].locked - priceForFilledQty,
+                available:
+                  userBalance[PRIMARY_CURRENCY].available - priceForFilledQty,
+                locked: userBalance[PRIMARY_CURRENCY].locked,
               };
               userBalance[symbol] = {
                 available: Number(userBalance[symbol]?.available) + fill.qty,
@@ -404,7 +379,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
               if (restingOrder.status === "filled") {
                 ordersAtPrice.splice(i, 1);
                 if (ordersAtPrice.length <= 0) {
-                  orderbook.asks.delete(price);
+                  orderbook.asks.delete(bestAskPrice);
                 }
               }
               break;
@@ -416,7 +391,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
               const fill: Fill = {
                 fillId,
                 symbol,
-                price,
+                price: bestAskPrice,
                 qty: availableQty,
                 buyOrderId: currentOrderId,
                 sellOrderId: restingOrder.orderId,
@@ -431,7 +406,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
                   side,
                   type,
                   symbol,
-                  price,
+                  price: bestAskPrice,
                   qty: qty,
                   filledQty: availableQty,
                   status: "partially_filled",
@@ -467,11 +442,11 @@ function handleEngineRequest(message: EngineRequest): unknown {
               FILLS.push(fill);
 
               // td:: this is getting repeated in above conditionals 2 times. only fill.qty is different
-              const priceForFilledQty = fill.qty * price;
+              const priceForFilledQty = fill.qty * bestAskPrice;
               userBalance[PRIMARY_CURRENCY] = {
-                available: userBalance[PRIMARY_CURRENCY].available,
-                locked:
-                  userBalance[PRIMARY_CURRENCY].locked - priceForFilledQty,
+                available:
+                  userBalance[PRIMARY_CURRENCY].available - priceForFilledQty,
+                locked: userBalance[PRIMARY_CURRENCY].locked,
               };
               userBalance[symbol] = {
                 available: Number(userBalance[symbol]?.available) + fill.qty,
@@ -497,49 +472,18 @@ function handleEngineRequest(message: EngineRequest): unknown {
               if (restingOrder.status === "filled") {
                 ordersAtPrice.splice(i, 1);
                 if (ordersAtPrice.length <= 0) {
-                  orderbook.asks.delete(price);
+                  orderbook.asks.delete(bestAskPrice);
                 }
               }
             }
           }
 
-          if (remainingQty > 0) {
-            // add the bid to order book
-            const availableBids = orderbook.bids.get(price);
-            const currentOrder = {
-              orderId: currentOrderId,
-              userId,
-              side,
-              type,
-              symbol,
-              price,
-              qty,
-              filledQty: qty - remainingQty,
-              status: "partially_filled",
-              createdAt: new Date().getTime(),
-            } satisfies RestingOrder;
-            if (!availableBids) {
-              orderbook.bids.set(price, [currentOrder]);
-            } else {
-              availableBids.push(currentOrder);
-            }
-          }
+          // get the next bestAskPrice
+          bestAskPrice = getNextBestAskPrice(symbol, bestAskPrice);
         }
-      } else if (side === "sell") {
-        if (
-          !userBalance[symbol] ||
-          Number(userBalance[symbol]?.available) < qty
-        ) {
-          throw new Error("User has insufficient balance");
-        }
-        userBalance[symbol] = {
-          available: userBalance[symbol].available - qty,
-          locked: userBalance[symbol].locked + qty,
-        };
 
-        const ordersAtPrice = orderbook.bids.get(price);
-        if (!ordersAtPrice) {
-          const availableAsks = orderbook.asks.get(price);
+        if (remainingQty > 0) {
+          const filledQty = qty - remainingQty;
           const currentOrder = {
             orderId: currentOrderId,
             userId,
@@ -548,23 +492,51 @@ function handleEngineRequest(message: EngineRequest): unknown {
             symbol,
             price,
             qty,
-            filledQty: 0,
-            status: "open",
+            filledQty,
+            status: filledQty === 0 ? "open" : "partially_filled",
             createdAt: new Date().getTime(),
           } satisfies RestingOrder;
-          // push the current to the order book as there are no bids matching given price
-          if (!availableAsks) {
-            orderbook.asks.set(price, [currentOrder]);
+          // add the bid to order book
+          const availableBids = orderbook.bids.get(price);
+          // push the current bid to the order book as there are no asks matching given price
+          if (!availableBids) {
+            orderbook.bids.set(price, [currentOrder]);
           } else {
-            availableAsks.push(currentOrder);
+            availableBids.push(currentOrder);
           }
-          ORDERS.set(currentOrderId, {
-            ...currentOrder,
-            fills: [],
-          });
-        } else {
-          // there are bids so some / all of this can be matched
-          let remainingQty = qty;
+
+          if (filledQty === 0) {
+            // pushing only the open orders, as any other type wud have been pushed from inside the for loop
+            ORDERS.set(currentOrderId, {
+              ...currentOrder,
+              fills: [],
+            });
+          }
+
+          // lock user balance for remainingQty
+          const remainingTotalPrice = price * remainingQty;
+          userBalance[PRIMARY_CURRENCY] = {
+            available:
+              userBalance[PRIMARY_CURRENCY].available - remainingTotalPrice,
+            locked: userBalance[PRIMARY_CURRENCY].locked + remainingTotalPrice,
+          };
+        }
+      } else if (side === "sell") {
+        let bestBidPrice = getNextBestBidPrice(symbol);
+
+        if (
+          !userBalance[symbol] ||
+          Number(userBalance[symbol]?.available) < qty
+        ) {
+          throw new Error("User has insufficient balance");
+        }
+
+        let remainingQty = qty;
+        while (remainingQty > 0 && bestBidPrice && bestBidPrice >= price) {
+          const ordersAtPrice = orderbook.bids.get(
+            bestBidPrice,
+          ) as RestingOrder[]; // this'll always be there because i got the bestBidPrice from bids
+
           for (let i = ordersAtPrice.length - 1; i >= 0; i--) {
             const restingOrder = ordersAtPrice[i]!;
             const availableQty = restingOrder.qty - restingOrder.filledQty;
@@ -574,7 +546,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
               const fill: Fill = {
                 fillId,
                 symbol,
-                price,
+                price: bestBidPrice,
                 qty: remainingQty,
                 buyOrderId: restingOrder.orderId,
                 sellOrderId: currentOrderId,
@@ -589,7 +561,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
                   side,
                   type,
                   symbol,
-                  price,
+                  price: bestBidPrice,
                   qty: remainingQty,
                   filledQty: remainingQty,
                   status: "filled",
@@ -625,7 +597,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
               FILLS.push(fill);
 
               // add currency & deduct symbol qty from seller
-              const priceForFilledQty = fill.qty * price;
+              const priceForFilledQty = fill.qty * bestBidPrice;
               userBalance[PRIMARY_CURRENCY] = {
                 available:
                   Number(userBalance[PRIMARY_CURRENCY]?.available) +
@@ -643,10 +615,10 @@ function handleEngineRequest(message: EngineRequest): unknown {
 
               // deduct currency & add symbol qty from buyer
               buyerBalance[PRIMARY_CURRENCY] = {
-                available: Number(buyerBalance[PRIMARY_CURRENCY]?.available),
-                locked:
-                  Number(buyerBalance[PRIMARY_CURRENCY]?.locked) -
+                available:
+                  Number(buyerBalance[PRIMARY_CURRENCY]?.available) -
                   priceForFilledQty,
+                locked: Number(buyerBalance[PRIMARY_CURRENCY]?.locked),
               };
               buyerBalance[symbol] = {
                 available: Number(buyerBalance[symbol]?.available) + fill.qty,
@@ -661,7 +633,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
               const fill: Fill = {
                 fillId,
                 symbol,
-                price,
+                price: bestBidPrice,
                 qty: remainingQty,
                 buyOrderId: restingOrder.orderId,
                 sellOrderId: currentOrderId,
@@ -676,7 +648,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
                   side,
                   type,
                   symbol,
-                  price,
+                  price: bestBidPrice,
                   qty: remainingQty,
                   filledQty: remainingQty,
                   status: "filled",
@@ -712,7 +684,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
               FILLS.push(fill);
 
               // add currency & deduct symbol qty from seller
-              const priceForFilledQty = fill.qty * price;
+              const priceForFilledQty = fill.qty * bestBidPrice;
               userBalance[PRIMARY_CURRENCY] = {
                 available:
                   Number(userBalance[PRIMARY_CURRENCY]?.available) +
@@ -730,7 +702,9 @@ function handleEngineRequest(message: EngineRequest): unknown {
 
               // deduct currency & add symbol qty from buyer
               buyerBalance[PRIMARY_CURRENCY] = {
-                available: Number(buyerBalance[PRIMARY_CURRENCY]?.available),
+                available:
+                  Number(buyerBalance[PRIMARY_CURRENCY]?.available) -
+                  priceForFilledQty,
                 locked:
                   Number(buyerBalance[PRIMARY_CURRENCY]?.locked) -
                   priceForFilledQty,
@@ -746,7 +720,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
               if (restingOrder.status === "filled") {
                 ordersAtPrice.splice(i, 1);
                 if (ordersAtPrice.length <= 0) {
-                  orderbook.bids.delete(price);
+                  orderbook.bids.delete(bestBidPrice);
                 }
               }
               break;
@@ -758,7 +732,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
               const fill: Fill = {
                 fillId,
                 symbol,
-                price,
+                price: bestBidPrice,
                 qty: availableQty,
                 buyOrderId: restingOrder.orderId,
                 sellOrderId: currentOrderId,
@@ -773,7 +747,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
                   side,
                   type,
                   symbol,
-                  price,
+                  price: bestBidPrice,
                   qty: qty,
                   filledQty: availableQty,
                   status: "partially_filled",
@@ -810,7 +784,7 @@ function handleEngineRequest(message: EngineRequest): unknown {
 
               // td:: this is getting repeated in above conditionals 2 times. only fill.qty is different
               // add currency & deduct symbol qty from seller
-              const priceForFilledQty = fill.qty * price;
+              const priceForFilledQty = fill.qty * bestBidPrice;
               userBalance[PRIMARY_CURRENCY] = {
                 available:
                   Number(userBalance[PRIMARY_CURRENCY]?.available) +
@@ -828,10 +802,10 @@ function handleEngineRequest(message: EngineRequest): unknown {
 
               // deduct currency & add symbol qty from buyer
               buyerBalance[PRIMARY_CURRENCY] = {
-                available: Number(buyerBalance[PRIMARY_CURRENCY]?.available),
-                locked:
-                  Number(buyerBalance[PRIMARY_CURRENCY]?.locked) -
+                available:
+                  Number(buyerBalance[PRIMARY_CURRENCY]?.available) -
                   priceForFilledQty,
+                locked: Number(buyerBalance[PRIMARY_CURRENCY]?.locked),
               };
               buyerBalance[symbol] = {
                 available: Number(buyerBalance[symbol]?.available) + fill.qty,
@@ -842,33 +816,51 @@ function handleEngineRequest(message: EngineRequest): unknown {
               if (restingOrder.status === "filled") {
                 ordersAtPrice.splice(i, 1);
                 if (ordersAtPrice.length <= 0) {
-                  orderbook.bids.delete(price);
+                  orderbook.bids.delete(bestBidPrice);
                 }
               }
             }
           }
 
-          if (remainingQty > 0) {
-            // add the bid to order book
-            const availableAsks = orderbook.asks.get(price);
-            const currentOrder = {
-              orderId: currentOrderId,
-              userId,
-              side,
-              type,
-              symbol,
-              price,
-              qty,
-              filledQty: qty - remainingQty,
-              status: "partially_filled",
-              createdAt: new Date().getTime(),
-            } satisfies RestingOrder;
-            if (!availableAsks) {
-              orderbook.asks.set(price, [currentOrder]);
-            } else {
-              availableAsks.push(currentOrder);
-            }
+          // get the next bestBidPrice
+          bestBidPrice = getNextBestBidPrice(symbol, bestBidPrice);
+        }
+
+        if (remainingQty > 0) {
+          // add the bid to order book
+          const filledQty = qty - remainingQty;
+          const currentOrder = {
+            orderId: currentOrderId,
+            userId,
+            side,
+            type,
+            symbol,
+            price,
+            qty,
+            filledQty,
+            status: filledQty === 0 ? "open" : "partially_filled",
+            createdAt: new Date().getTime(),
+          } satisfies RestingOrder;
+          const availableAsks = orderbook.asks.get(price);
+          if (!availableAsks) {
+            orderbook.asks.set(price, [currentOrder]);
+          } else {
+            availableAsks.push(currentOrder);
           }
+
+          if (filledQty === 0) {
+            // pushing only the open orders, as any other type wud have been pushed from inside the for loop
+            ORDERS.set(currentOrderId, {
+              ...currentOrder,
+              fills: [],
+            });
+          }
+
+          // lock user balance for remainingQty
+          userBalance[symbol] = {
+            available: userBalance[symbol].available - remainingQty,
+            locked: userBalance[symbol].locked + remainingQty,
+          };
         }
       }
     } else if (type === "market") {
@@ -884,8 +876,11 @@ function handleEngineRequest(message: EngineRequest): unknown {
           !userBalance[PRIMARY_CURRENCY] ||
           Number(userBalance[PRIMARY_CURRENCY]?.available) < totalPrice
         ) {
+          // td:: this seems dodgy as the bestAskPrice right now might not have the available qty to match and then more funds might be needed at higher prices. in that case throwing might not be ideal as some might be settled. think more...
           throw new Error("User has insufficient balance");
         }
+
+        // td:: update balance updation logic as it does not refund on cancellation the full amount as at that point the bestAskPrice could be different
         userBalance[PRIMARY_CURRENCY] = {
           available: userBalance[PRIMARY_CURRENCY].available - totalPrice,
           locked: userBalance[PRIMARY_CURRENCY].locked + totalPrice,
