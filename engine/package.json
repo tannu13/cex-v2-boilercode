@@ -4,10 +4,13 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun --watch run src/index.ts"
+    "dev": "bun --watch run src/index.ts",
+    "test": "NODE_ENV=test vitest run",
+    "test:watch": "NODE_ENV=test vitest"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "vitest": "^4.1.6"
   },
   "peerDependencies": {
     "typescript": "^5"

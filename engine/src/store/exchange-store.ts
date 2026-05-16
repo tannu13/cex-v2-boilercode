@@ -69,26 +69,30 @@ export interface DepthResponse {
   asks: DepthLevel[];
 }
 
+export interface Store {
+  balances: Map<string, Record<string, Balance>>;
+  orderbooks: Map<string, OrderBook>;
+  orders: Map<string, OrderRecord>;
+  fills: Fill[];
+}
+
 export const PRIMARY_CURRENCY = "INR";
 export const SUPPORTED_SYMBOLS = ["BTC", "SOL"];
-const intialOrderBook = SUPPORTED_SYMBOLS.map((s) => ({
-  symbol: s,
-  bids: new Map(),
-  asks: new Map(),
-}));
-export const BALANCES = new Map<string, Record<string, Balance>>();
-export const ORDERBOOKS = new Map<string, OrderBook>(
-  intialOrderBook.map((entry) => [
-    entry.symbol,
-    { bids: entry.bids, asks: entry.asks },
-  ]),
-);
-/*
-[
-  ["BTC", { bids: new Map(), asks: new Map() }],
-  ["SOL", { bids: new Map(), asks: new Map() }],
-  ["ABC", { bids: new Map(), asks: new Map() }],
-]
-*/
-export const ORDERS = new Map<string, OrderRecord>();
-export const FILLS: Fill[] = [];
+export function createExchangeStore(): Store {
+  const intialOrderBook = SUPPORTED_SYMBOLS.map((s) => ({
+    symbol: s,
+    bids: new Map(),
+    asks: new Map(),
+  }));
+  return {
+    balances: new Map<string, Record<string, Balance>>(),
+    orderbooks: new Map<string, OrderBook>(
+      intialOrderBook.map((entry) => [
+        entry.symbol,
+        { bids: entry.bids, asks: entry.asks },
+      ]),
+    ),
+    orders: new Map<string, OrderRecord>(),
+    fills: [],
+  };
+}
